@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Generated files and downloaded model weights
+outputs/*
+!outputs/.gitkeep
+models/
+runs/
+*.pt
+*.onnx
+*.engine
+
+# Large local datasets
+data/raw/
