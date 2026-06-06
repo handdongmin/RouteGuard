@@ -6,6 +6,19 @@ SEVERITY_PENALTIES = {
     "danger": 20,
 }
 
+OBJECT_RISK_BONUS = {
+    "bed": 10,
+    "bench": 10,
+    "chair": 12,
+    "couch": 12,
+    "dining table": 10,
+    "backpack": 5,
+    "handbag": 5,
+    "suitcase": 7,
+    "potted plant": 6,
+    "umbrella": 4,
+}
+
 
 KOREAN_LABELS = {
     "backpack": "가방",
@@ -29,6 +42,20 @@ KOREAN_LABELS = {
     "teddy bear": "인형",
     "umbrella": "우산",
     "vase": "화병",
+    "box": "박스",
+    "cable": "전선",
+    "cord": "전선",
+    "electric outlet": "콘센트",
+    "extension cord": "멀티탭",
+    "fire extinguisher": "소화기",
+    "fire_extinguisher": "소화기",
+    "multi tap": "멀티탭",
+    "outlet": "콘센트",
+    "power outlet": "콘센트",
+    "power strip": "멀티탭",
+    "power_strip": "멀티탭",
+    "socket": "콘센트",
+    "wire": "전선",
 }
 
 
@@ -40,8 +67,13 @@ def build_risk(frame_analysis: dict) -> dict | None:
 
     label = frame_analysis.get("label", "object")
     object_name = KOREAN_LABELS.get(label, label)
+    if frame_analysis.get("risk_group") == "large_clutter":
+        object_name = "큰 물체"
     overlap = frame_analysis.get("overlap_ratio", 0.0)
     penalty = SEVERITY_PENALTIES[severity]
+    penalty += OBJECT_RISK_BONUS.get(label, 0)
+    if frame_analysis.get("risk_group") == "large_clutter":
+        penalty += 7
     if severity == "danger" and frame_analysis.get("center_in_path"):
         penalty += 5
 
@@ -65,7 +97,12 @@ def build_risk(frame_analysis: dict) -> dict | None:
 def calculate_route_score(risks: list[dict]) -> int:
     """Return a 0-100 score where a higher value indicates a clearer route."""
     penalty = sum(int(risk.get("penalty", 0)) for risk in risks)
-    return max(0, min(100, 100 - penalty))
+    if len(risks) >= 3:
+        penalty += 10
+    score = max(0, min(100, 100 - penalty))
+    if risks and score < 20:
+        return 20
+    return score
 
 
 def risk_level(score: int) -> str:

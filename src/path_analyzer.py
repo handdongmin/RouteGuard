@@ -36,6 +36,23 @@ SMALL_CLUTTER = {
     "vase",
 }
 
+CUSTOM_RISKS = {
+    "box",
+    "cable",
+    "cord",
+    "electric outlet",
+    "extension cord",
+    "fire extinguisher",
+    "fire_extinguisher",
+    "multi tap",
+    "outlet",
+    "power outlet",
+    "power strip",
+    "power_strip",
+    "socket",
+    "wire",
+}
+
 
 class PathAnalyzer:
     """Measure how detected objects overlap a candidate walking path."""
@@ -85,14 +102,19 @@ class PathAnalyzer:
             overlap_ratio = overlap_area / object_area if object_area else 0.0
 
             center = ((x1 + x2) // 2, (y1 + y2) // 2)
+            bottom_center = ((x1 + x2) // 2, y2)
             center_in_path = cv2.pointPolygonTest(path_polygon, center, False) >= 0
+            bottom_in_path = cv2.pointPolygonTest(path_polygon, bottom_center, False) >= 0
             frame_area = frame.shape[0] * frame.shape[1]
             bbox_area_ratio = object_area / frame_area if frame_area else 0.0
+            risk_group = self._risk_group(detection["label"], bbox_area_ratio)
             severity = self._classify_severity(
                 detection["label"],
+                risk_group,
                 bbox_area_ratio,
                 overlap_ratio,
                 center_in_path,
+                bottom_in_path,
             )
 
             measurements.append(
@@ -101,18 +123,23 @@ class PathAnalyzer:
                     "overlap_ratio": overlap_ratio,
                     "overlap_area": overlap_area,
                     "bbox_area_ratio": bbox_area_ratio,
-                    "risk_group": self._risk_group(detection["label"]),
+                    "risk_group": risk_group,
                     "center_in_path": center_in_path,
+                    "bottom_in_path": bottom_in_path,
                     "severity": severity,
                 }
             )
 
         return measurements
 
-    def _risk_group(self, label: str) -> str:
+    def _risk_group(self, label: str, bbox_area_ratio: float = 0.0) -> str:
         """Return a broad obstacle group for filtering and reporting."""
         if label in SMALL_CLUTTER:
+            if bbox_area_ratio >= 0.12:
+                return "large_clutter"
             return "small"
+        if label in CUSTOM_RISKS:
+            return "custom"
         if label in FURNITURE_OBSTACLES:
             return "furniture"
         if label in LARGE_OBSTACLES:
@@ -122,15 +149,25 @@ class PathAnalyzer:
     def _classify_severity(
         self,
         label: str,
+        risk_group: str,
         bbox_area_ratio: float,
         overlap_ratio: float,
         center_in_path: bool,
+        bottom_in_path: bool,
     ) -> str:
         """Classify path risk with stricter rules for small clutter."""
-        if label in SMALL_CLUTTER:
+        if risk_group == "large_clutter":
+            min_area = 0.08
+            danger_overlap = 0.18
+            caution_overlap = 0.08
+        elif label in SMALL_CLUTTER:
             min_area = 0.035
             danger_overlap = 0.62
             caution_overlap = 0.42
+        elif risk_group == "custom":
+            min_area = 0.01
+            danger_overlap = 0.28
+            caution_overlap = 0.12
         elif label in FURNITURE_OBSTACLES:
             min_area = 0.045
             danger_overlap = 0.45
@@ -148,6 +185,6 @@ class PathAnalyzer:
             return "safe"
         if overlap_ratio >= danger_overlap or (overlap_ratio >= danger_overlap * 0.75 and center_in_path):
             return "danger"
-        if overlap_ratio >= caution_overlap and center_in_path:
+        if overlap_ratio >= caution_overlap and (center_in_path or bottom_in_path):
             return "caution"
         return "safe"

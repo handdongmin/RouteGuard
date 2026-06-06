@@ -31,6 +31,24 @@ DEFAULT_OBSTACLE_CLASSES = {
 }
 
 
+CUSTOM_RISK_CLASSES = {
+    "box",
+    "cable",
+    "cord",
+    "electric outlet",
+    "extension cord",
+    "fire extinguisher",
+    "fire_extinguisher",
+    "multi tap",
+    "outlet",
+    "power outlet",
+    "power strip",
+    "power_strip",
+    "socket",
+    "wire",
+}
+
+
 class ObjectDetector:
     """Detect candidate obstacles in video frames."""
 
@@ -41,7 +59,7 @@ class ObjectDetector:
         model: Any | None = None,
     ) -> None:
         self.config = config or AnalysisConfig()
-        self.obstacle_classes = set(obstacle_classes or DEFAULT_OBSTACLE_CLASSES)
+        self.obstacle_classes = set(obstacle_classes or (DEFAULT_OBSTACLE_CLASSES | CUSTOM_RISK_CLASSES))
 
         if model is None:
             from ultralytics import YOLO

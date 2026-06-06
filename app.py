@@ -1,5 +1,6 @@
 """Streamlit entry point for RouteGuard."""
 
+import base64
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -8,7 +9,7 @@ import pandas as pd
 import streamlit as st
 
 from src.config import AnalysisConfig
-from src.detector import DEFAULT_OBSTACLE_CLASSES, ObjectDetector
+from src.detector import ObjectDetector
 from src.reporting import build_recommendations, compare_results, event_rows, render_text_report, summarize_events
 from src.video_analyzer import analyze_video
 
@@ -23,37 +24,324 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 RESULT_DIR.mkdir(parents=True, exist_ok=True)
 
 
-@st.cache_resource
-def load_detector(model_name: str, confidence_threshold: float, image_size: int):
-    """Load YOLO once per model setting so repeated analyses are faster."""
-    config = AnalysisConfig(
-        model_name=model_name,
-        confidence_threshold=confidence_threshold,
-        inference_image_size=image_size,
+def find_background_image() -> Path | None:
+    """Return an optional local background image from assets."""
+    for name in ["background.jpg", "background.jpeg", "background.png", "background.webp"]:
+        path = Path("assets") / name
+        if path.exists():
+            return path
+    return None
+
+
+def background_css() -> str:
+    """Build CSS background using a local image when available."""
+    background = find_background_image()
+    if not background:
+        return """
+        background:
+            radial-gradient(circle at 20% 15%, rgba(34, 197, 94, 0.22), transparent 28rem),
+            radial-gradient(circle at 85% 10%, rgba(59, 130, 246, 0.20), transparent 24rem),
+            linear-gradient(135deg, #0F172A 0%, #111827 42%, #172554 100%);
+        """
+
+    mime = "image/png" if background.suffix.lower() == ".png" else "image/jpeg"
+    if background.suffix.lower() == ".webp":
+        mime = "image/webp"
+    encoded = base64.b64encode(background.read_bytes()).decode("utf-8")
+    return f"""
+        background:
+            linear-gradient(135deg, rgba(15, 23, 42, 0.68), rgba(17, 24, 39, 0.62)),
+            url("data:{mime};base64,{encoded}");
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+    """
+
+
+def inject_theme() -> None:
+    """Apply RouteGuard visual theme."""
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            {background_css()}
+            color: #F8FAFC;
+        }}
+
+        [data-testid="stHeader"] {{
+            background: transparent;
+        }}
+
+        [data-testid="stSidebar"] {{
+            background: rgba(2, 6, 23, 0.94);
+            border-right: 1px solid rgba(148, 163, 184, 0.24);
+            backdrop-filter: blur(18px);
+        }}
+
+        .block-container {{
+            padding-top: 2.0rem;
+            padding-bottom: 3rem;
+            max-width: 1220px;
+        }}
+
+        .rg-hero {{
+            padding: 2.1rem 2.3rem;
+            border: 1px solid rgba(148, 163, 184, 0.24);
+            border-radius: 28px;
+            background:
+                linear-gradient(135deg, rgba(2, 6, 23, 0.88), rgba(15, 23, 42, 0.78)),
+                linear-gradient(135deg, rgba(34, 197, 94, 0.18), rgba(59, 130, 246, 0.12));
+            box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+            backdrop-filter: blur(14px);
+            margin-bottom: 1.25rem;
+        }}
+
+        .rg-eyebrow {{
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.35rem 0.72rem;
+            border-radius: 999px;
+            color: #BBF7D0;
+            background: rgba(22, 101, 52, 0.36);
+            border: 1px solid rgba(134, 239, 172, 0.28);
+            font-size: 0.82rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }}
+
+        .rg-title {{
+            margin: 0.78rem 0 0.2rem;
+            font-size: clamp(2.6rem, 6vw, 5.4rem);
+            line-height: 0.95;
+            font-weight: 900;
+            letter-spacing: -0.07em;
+            color: #F8FAFC;
+        }}
+
+        .rg-subtitle {{
+            max-width: 760px;
+            color: #CBD5E1;
+            font-size: 1.08rem;
+            line-height: 1.7;
+            margin-top: 0.85rem;
+        }}
+
+        .rg-badges {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            margin-top: 1.15rem;
+        }}
+
+        .rg-badge {{
+            padding: 0.48rem 0.75rem;
+            border-radius: 999px;
+            color: #E2E8F0;
+            background: rgba(15, 23, 42, 0.64);
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            font-size: 0.9rem;
+        }}
+
+        .rg-panel {{
+            padding: 1.25rem 1.35rem;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            border-radius: 22px;
+            background: rgba(2, 6, 23, 0.84);
+            box-shadow: 0 18px 55px rgba(0, 0, 0, 0.20);
+            backdrop-filter: blur(16px);
+            margin: 0.8rem 0 1rem;
+        }}
+
+        .rg-section-title {{
+            display: flex;
+            align-items: center;
+            gap: 0.55rem;
+            margin-bottom: 0.75rem;
+        }}
+
+        .rg-section-title span {{
+            display: inline-flex;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 12px;
+            align-items: center;
+            justify-content: center;
+            background: rgba(34, 197, 94, 0.22);
+            border: 1px solid rgba(134, 239, 172, 0.28);
+            font-weight: 900;
+        }}
+
+        .rg-note-card {{
+            padding: 0.9rem 1rem;
+            border-radius: 18px;
+            background: rgba(15, 23, 42, 0.74);
+            border: 1px solid rgba(148, 163, 184, 0.20);
+            margin: 0.55rem 0;
+        }}
+
+        .rg-side-title {{
+            font-size: 1.55rem;
+            font-weight: 900;
+            letter-spacing: -0.04em;
+            color: #F8FAFC;
+            margin-bottom: 0.25rem;
+        }}
+
+        .rg-side-copy {{
+            color: #CBD5E1;
+            line-height: 1.65;
+            font-size: 0.94rem;
+        }}
+
+        .rg-side-step {{
+            padding: 0.72rem 0.78rem;
+            border-radius: 15px;
+            background: rgba(15, 23, 42, 0.76);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            margin: 0.45rem 0;
+        }}
+
+        .rg-panel h3 {{
+            margin-top: 0;
+        }}
+
+        div[data-testid="stMetric"] {{
+            background: rgba(15, 23, 42, 0.90);
+            border: 1px solid rgba(148, 163, 184, 0.20);
+            border-radius: 18px;
+            padding: 1rem;
+            box-shadow: 0 12px 32px rgba(0, 0, 0, 0.18);
+        }}
+
+        div[data-testid="stMetric"] label {{
+            color: #E2E8F0 !important;
+            font-weight: 700 !important;
+        }}
+
+        div[data-testid="stMetricValue"] {{
+            color: #FFFFFF !important;
+        }}
+
+        .stTabs [data-baseweb="tab-list"] {{
+            gap: 0.45rem;
+        }}
+
+        .stTabs [data-baseweb="tab"] {{
+            border-radius: 999px;
+            padding: 0.55rem 1rem;
+            background: rgba(2, 6, 23, 0.90);
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            color: #F8FAFC;
+        }}
+
+        .stButton > button, .stDownloadButton > button {{
+            border-radius: 999px;
+            border: 1px solid rgba(134, 239, 172, 0.32);
+            background: linear-gradient(135deg, #16A34A, #2563EB);
+            color: white;
+            font-weight: 800;
+            box-shadow: 0 12px 28px rgba(37, 99, 235, 0.28);
+        }}
+
+        .stButton > button:hover, .stDownloadButton > button:hover {{
+            border-color: rgba(187, 247, 208, 0.72);
+            transform: translateY(-1px);
+        }}
+
+        div[data-testid="stDataFrame"], div[data-testid="stExpander"], div[data-testid="stAlert"] {{
+            border-radius: 18px;
+        }}
+
+        h1, h2, h3 {{
+            color: #F8FAFC;
+        }}
+
+        p, li, label, span, .stMarkdown, [data-testid="stMarkdownContainer"] {{
+            color: #F1F5F9 !important;
+        }}
+
+        div[data-testid="stCaptionContainer"], .stCaption {{
+            color: #CBD5E1 !important;
+        }}
+
+        .stRadio label, .stSelectbox label, .stFileUploader label, .stSlider label, .stCheckbox label {{
+            color: #F8FAFC !important;
+            font-weight: 700;
+        }}
+
+        input, textarea, div[data-baseweb="select"] {{
+            color: #0F172A !important;
+        }}
+
+        [data-testid="stFileUploader"] {{
+            background: rgba(248, 250, 252, 0.96);
+            border: 1px solid rgba(203, 213, 225, 0.95);
+            border-radius: 14px;
+            padding: 0.6rem 0.75rem;
+        }}
+
+        [data-testid="stFileUploader"] * {{
+            color: #0F172A !important;
+        }}
+
+        [data-testid="stFileUploader"] button {{
+            background: #FFFFFF !important;
+            color: #0F172A !important;
+            border: 1px solid #CBD5E1 !important;
+            box-shadow: none !important;
+        }}
+
+        [data-testid="stFileUploader"] small {{
+            color: #475569 !important;
+        }}
+
+        [data-testid="stRadio"] label span {{
+            color: #F8FAFC !important;
+            font-weight: 800;
+        }}
+
+        div[data-testid="stExpander"] {{
+            background: rgba(2, 6, 23, 0.80);
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            backdrop-filter: blur(12px);
+        }}
+
+        div[data-testid="stAlert"] {{
+            background: rgba(15, 23, 42, 0.86);
+            border: 1px solid rgba(148, 163, 184, 0.22);
+        }}
+
+        .stVideo video {{
+            max-height: 420px;
+            border-radius: 18px;
+            object-fit: contain;
+            background: rgba(2, 6, 23, 0.78);
+        }}
+
+        [data-testid="stImage"] img {{
+            max-height: 520px;
+            object-fit: contain;
+            border-radius: 18px;
+            border: 1px solid rgba(148, 163, 184, 0.22);
+            background: rgba(2, 6, 23, 0.72);
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
     )
-    return ObjectDetector(config)
+
+
+@st.cache_resource
+def load_detector():
+    """Load YOLO once so repeated analyses are faster."""
+    return ObjectDetector(AnalysisConfig())
 
 
 def build_config() -> AnalysisConfig:
-    """Build runtime settings from the sidebar controls."""
-    st.sidebar.header("분석 설정")
-    confidence = st.sidebar.slider("탐지 confidence", 0.20, 0.70, 0.35, 0.05)
-    path_width = st.sidebar.slider("중앙 통로 폭", 0.30, 0.60, 0.42, 0.02)
-    sample_interval = st.sidebar.slider("프레임 샘플 간격", 3, 12, 5, 1)
-    min_observations = st.sidebar.slider("위험 반복 최소 횟수", 1, 5, 2, 1)
-    image_size = st.sidebar.select_slider("YOLO 입력 크기", options=[416, 512, 640, 768], value=640)
-    max_seconds = st.sidebar.slider("최대 분석 길이(초)", 5, 30, 20, 5)
-    draw_safe = st.sidebar.checkbox("안전 후보 박스도 표시", value=False)
-
-    return AnalysisConfig(
-        confidence_threshold=confidence,
-        inference_image_size=image_size,
-        path_width_ratio=path_width,
-        frame_sample_interval=sample_interval,
-        min_event_observations=min_observations,
-        max_video_seconds=max_seconds,
-        draw_safe_detections=draw_safe,
-    )
+    """Return the fixed runtime settings used by the demo app."""
+    return AnalysisConfig()
 
 
 def save_uploaded_file(uploaded_file) -> Path:
@@ -82,6 +370,7 @@ def analyze_path(input_path: Path, config: AnalysisConfig, detector: ObjectDetec
 def render_score_card(result: dict) -> None:
     """Render top-level score and performance metrics."""
     summary = summarize_events(result["events"])
+    st.subheader("점검 결과")
     cols = st.columns(5)
     cols[0].metric("안전 점수", f"{result['score']} / 100")
     cols[1].metric("위험 수준", result["risk_level"])
@@ -96,37 +385,106 @@ def render_event_section(result: dict) -> None:
     left, right = st.columns([2, 1])
 
     with left:
-        st.subheader("시간대별 위험 요소")
+        st.subheader("시간대별 발견 내용")
         if events:
             st.dataframe(pd.DataFrame(event_rows(events)), use_container_width=True, hide_index=True)
         else:
-            st.success("통로 영역과 크게 겹치는 위험 후보가 발견되지 않았습니다.")
+            st.success("중앙 통로를 크게 막는 물체가 발견되지 않았습니다.")
 
     with right:
-        st.subheader("개선 피드백")
+        st.subheader("바로 할 일")
         for recommendation in build_recommendations(events, result["score"]):
             st.write(f"- {recommendation}")
 
 
+def top_detection_rows(result: dict) -> list[dict]:
+    """Return the most frequently detected objects in a readable table."""
+    counts = result.get("detection_counts", {})
+    return [
+        {"물체": label, "확인된 장면 수": count}
+        for label, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:6]
+    ]
+
+
+def decision_rows(result: dict) -> list[dict]:
+    """Explain why RouteGuard produced the score without exposing raw settings."""
+    events = result.get("events", [])
+    rows = [
+        {
+            "판단 항목": "통로를 막은 정도",
+            "결과": f"가장 큰 겹침 {result.get('max_path_overlap', 0.0):.0%}",
+            "의미": "중앙 이동 경로와 물체 박스가 많이 겹칠수록 위험하게 봅니다.",
+        },
+        {
+            "판단 항목": "반복 감지",
+            "결과": f"위험 장면 {result.get('risk_sampled_frames', 0)}개 / 확인 장면 {result.get('sampled_frames', 0)}개",
+            "의미": "한순간만 지나간 물체보다 여러 장면에서 계속 보인 장애물을 더 중요하게 봅니다.",
+        },
+        {
+            "판단 항목": "위험 후보 수",
+            "결과": f"{len(events)}개 이벤트",
+            "의미": "서로 다른 장애물이 동시에 있으면 이동 공간이 더 좁다고 판단합니다.",
+        },
+    ]
+
+    total_penalty = sum(int(event.get("penalty", 0)) for event in events)
+    rows.append(
+        {
+            "판단 항목": "감점 합계",
+            "결과": f"-{total_penalty}점" if total_penalty else "0점",
+            "의미": "의자처럼 큰 물체, 중앙을 크게 막은 물체, 반복적으로 보인 물체에 더 큰 감점을 줍니다.",
+        }
+    )
+    return rows
+
+
+def render_result_media(result: dict) -> None:
+    """Render a reliable visual result, with video as a secondary view."""
+    st.subheader("분석 결과 미리보기")
+    preview_value = result.get("preview_path") or ""
+    preview_path = Path(preview_value) if preview_value else None
+    if preview_path and preview_path.exists():
+        st.image(
+            str(preview_path),
+            caption=f"가장 뚜렷하게 판단된 장면: {result.get('preview_timestamp', 0.0):.1f}초",
+            use_container_width=True,
+        )
+    else:
+        st.info("대표 장면 이미지를 만들지 못해 결과 영상만 표시합니다.")
+
+    with st.expander("분석 결과 영상 재생", expanded=False):
+        st.video(result["output_path"])
+        st.caption("브라우저에 따라 영상 플레이어가 검게 보일 수 있어 위의 대표 장면을 함께 제공합니다.")
+
+
+def render_source_preview(input_path: Path) -> None:
+    """Keep uploaded video preview compact so it does not dominate the page."""
+    st.caption(f"선택된 영상: {input_path.name}")
+    with st.expander("원본 영상 미리보기", expanded=False):
+        st.video(str(input_path))
+
+
 def render_diagnostics(result: dict) -> None:
-    """Render detection and runtime diagnostics."""
-    with st.expander("분석 근거와 성능 지표"):
+    """Render user-friendly analysis evidence."""
+    with st.expander("자세한 분석 근거", expanded=True):
+        st.markdown(
+            "RouteGuard는 영상의 중앙 하단을 이동 통로로 보고, 물체가 그 영역을 얼마나 오래 그리고 얼마나 크게 막는지 확인합니다."
+        )
         cols = st.columns(4)
-        cols[0].metric("분석 프레임", result["frames"])
-        cols[1].metric("샘플 프레임", result["sampled_frames"])
-        cols[2].metric("위험 샘플 비율", f"{result['risk_frame_ratio']:.0%}")
-        cols[3].metric("처리 시간", f"{result['elapsed_seconds']:.1f}s")
+        cols[0].metric("분석 길이", f"{result.get('duration_seconds', 0):.1f}초")
+        cols[1].metric("확인한 장면", result["sampled_frames"])
+        cols[2].metric("위험 장면 비율", f"{result['risk_frame_ratio']:.0%}")
+        cols[3].metric("처리 시간", f"{result['elapsed_seconds']:.1f}초")
 
-        st.write("객체 후보 카운트")
-        counts = result.get("detection_counts", {})
-        if counts:
-            count_rows = [{"객체": label, "탐지 횟수": count} for label, count in sorted(counts.items())]
-            st.dataframe(pd.DataFrame(count_rows), use_container_width=True, hide_index=True)
+        st.write("점수 판단 요약")
+        st.dataframe(pd.DataFrame(decision_rows(result)), use_container_width=True, hide_index=True)
+
+        st.write("영상에서 자주 확인된 물체")
+        rows = top_detection_rows(result)
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
         else:
-            st.caption("탐지된 후보 객체가 없습니다.")
-
-        st.write("사용 설정")
-        st.json(result["config"], expanded=False)
+            st.caption("반복적으로 확인된 물체가 없습니다.")
 
 
 def render_downloads(result: dict) -> None:
@@ -167,12 +525,12 @@ def render_single_analysis(config: AnalysisConfig, detector: ObjectDetector) -> 
             input_path = samples[label]
 
     if input_path is None:
-        st.info("방에서 출입구 방향으로 촬영한 5~15초 영상을 선택하면 분석을 시작할 수 있습니다.")
+        st.info("점검할 실내 공간 영상을 선택해 주세요.")
         return
 
-    st.video(str(input_path))
+    render_source_preview(input_path)
     if st.button("분석 시작", type="primary"):
-        with st.spinner("YOLO 객체 탐지와 통로 겹침 분석을 실행하는 중입니다..."):
+        with st.spinner("영상을 분석하고 안전 점수를 계산하는 중입니다..."):
             result = analyze_path(input_path, config, detector, "single")
         st.session_state["last_result"] = result
 
@@ -182,8 +540,7 @@ def render_single_analysis(config: AnalysisConfig, detector: ObjectDetector) -> 
 
     st.divider()
     render_score_card(result)
-    st.subheader("분석 결과 영상")
-    st.video(result["output_path"])
+    render_result_media(result)
     render_event_section(result)
     render_diagnostics(result)
     render_downloads(result)
@@ -196,17 +553,19 @@ def render_compare_analysis(config: AnalysisConfig, detector: ObjectDetector) ->
     after = st.file_uploader("정리 후 영상", type=["mp4", "mov", "avi"], key="after_video")
 
     if not before or not after:
-        st.info("같은 위치에서 촬영한 정리 전/후 영상을 넣으면 점수 변화를 비교합니다.")
+        st.info("같은 위치에서 촬영한 정리 전 영상과 정리 후 영상을 넣으면 변화가 한눈에 보입니다.")
         return
 
     before_path = save_uploaded_file(before)
     after_path = save_uploaded_file(after)
     cols = st.columns(2)
-    cols[0].video(str(before_path))
-    cols[1].video(str(after_path))
+    with cols[0]:
+        render_source_preview(before_path)
+    with cols[1]:
+        render_source_preview(after_path)
 
     if st.button("전후 비교 분석", type="primary"):
-        with st.spinner("두 영상을 같은 기준으로 분석하는 중입니다..."):
+        with st.spinner("정리 전후 영상을 같은 기준으로 비교하는 중입니다..."):
             before_result = analyze_path(before_path, config, detector, "before")
             after_result = analyze_path(after_path, config, detector, "after")
         st.session_state["compare_result"] = (before_result, after_result, compare_results(before_result, after_result))
@@ -227,40 +586,71 @@ def render_compare_analysis(config: AnalysisConfig, detector: ObjectDetector) ->
     cols = st.columns(2)
     with cols[0]:
         st.subheader("정리 전 결과")
-        st.video(before_result["output_path"])
+        render_result_media(before_result)
         render_event_section(before_result)
     with cols[1]:
         st.subheader("정리 후 결과")
-        st.video(after_result["output_path"])
+        render_result_media(after_result)
         render_event_section(after_result)
 
 
 st.set_page_config(page_title="RouteGuard", layout="wide")
-st.title("RouteGuard")
-st.caption("영상 기반 실내 비상 대피 경로 위험 요소 탐지 시스템")
+inject_theme()
 
 st.markdown(
     """
-    RouteGuard는 스마트폰으로 촬영한 짧은 실내 영상을 분석해 중앙 이동 경로를 막는 객체 후보를 찾습니다.
-    단순히 물체를 찾는 데서 끝나지 않고, 통로 겹침 정도와 반복 감지를 이용해 안전 점수와 시간대별 피드백을 제공합니다.
-    """
+    <section class="rg-hero">
+      <div class="rg-eyebrow">Indoor Route Safety Vision</div>
+      <div class="rg-title">RouteGuard</div>
+      <div class="rg-subtitle">
+        스마트폰으로 촬영한 실내 영상을 분석해 중앙 이동 경로를 막는 물체를 찾고,
+        통로 겹침 정도와 반복 감지를 이용해 안전 점수와 시간대별 피드백을 제공합니다.
+      </div>
+      <div class="rg-badges">
+        <span class="rg-badge">출입구 동선 점검</span>
+        <span class="rg-badge">안전 점수</span>
+        <span class="rg-badge">시간대별 피드백</span>
+        <span class="rg-badge">정리 전후 비교</span>
+      </div>
+    </section>
+    """,
+    unsafe_allow_html=True,
 )
 
-with st.expander("탐지 가능한 위험 후보와 한계"):
-    st.write(", ".join(sorted(DEFAULT_OBSTACLE_CLASSES)))
-    st.write(
-        "전선이나 멀티탭처럼 작고 가는 물체는 기본 YOLO 모델만으로 안정적으로 탐지하기 어렵습니다. "
-        "이 프로젝트는 법적 안전 인증이 아니라 대피 경로 점검을 돕는 보조 도구입니다."
-    )
+st.sidebar.markdown(
+    """
+    <div class="rg-side-title">RouteGuard</div>
+    <div class="rg-side-copy">
+      방뿐만 아니라 연구실, 동아리방, 소형 사무실처럼 물건이 많은 실내 공간에서도 사용할 수 있는 안전 점검 도구입니다.
+    </div>
+    <div class="rg-side-step"><b>1. 영상 선택</b><br/>점검할 실내 공간 영상을 올립니다.</div>
+    <div class="rg-side-step"><b>2. 자동 점검</b><br/>중앙 통로를 막는 물체와 반복되는 위험 구간을 찾습니다.</div>
+    <div class="rg-side-step"><b>3. 결과 확인</b><br/>안전 점수, 발견 시간, 표시된 결과 영상을 확인합니다.</div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.sidebar.markdown(
+    """
+    <div class="rg-note-card">
+      <b>점수 기준</b><br/>
+      80점 이상: 안전<br/>
+      50~79점: 주의<br/>
+      50점 미만: 위험
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+with st.expander("어떻게 판단하나요?"):
+    st.write("화면 아래쪽에서 출입구 방향으로 이어지는 중앙 통로를 기준으로 봅니다.")
+    st.write("물체가 그 통로와 많이 겹치고 여러 순간 반복해서 보이면 점수가 낮아집니다.")
+    st.write("정확한 물체 이름보다 실제로 지나가는 길을 막는지가 더 중요합니다.")
 
 runtime_config = build_config()
-runtime_detector = load_detector(
-    runtime_config.model_name,
-    runtime_config.confidence_threshold,
-    runtime_config.inference_image_size,
-)
+runtime_detector = load_detector()
 
-tab_single, tab_compare, tab_about = st.tabs(["단일 영상 분석", "정리 전후 비교", "프로젝트 설명"])
+tab_single, tab_compare, tab_about = st.tabs(["내 통로 점검", "정리 전후 비교", "도움말"])
 
 with tab_single:
     render_single_analysis(runtime_config, runtime_detector)
@@ -269,8 +659,8 @@ with tab_compare:
     render_compare_analysis(runtime_config, runtime_detector)
 
 with tab_about:
-    st.subheader("왜 직접 보는 것보다 RouteGuard가 필요한가요?")
-    st.write("- 익숙한 방에서는 위험 물체를 과소평가하기 쉽습니다.")
-    st.write("- RouteGuard는 어느 시점에 어떤 후보가 통로를 막았는지 기록합니다.")
-    st.write("- 감으로 판단하지 않고 통로 영역과 객체 박스의 겹침 정도를 점수화합니다.")
-    st.write("- 정리 전후 영상을 같은 기준으로 비교할 수 있어 개선 효과를 README에 보여주기 좋습니다.")
+    st.subheader("언제 쓰면 좋나요?")
+    st.write("- 방, 연구실, 동아리방, 소형 사무실처럼 물건이 많은 실내 공간을 점검하고 싶을 때")
+    st.write("- 기숙사나 원룸처럼 통로가 좁은 공간에서 큰 물건이 길을 막는지 확인할 때")
+    st.write("- 정리 전후 영상을 비교해 실제로 동선이 좋아졌는지 보고 싶을 때")
+    st.write("- 안전 점수와 결과 영상을 남겨 간단한 점검 기록으로 보관하고 싶을 때")

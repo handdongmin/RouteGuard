@@ -23,11 +23,14 @@ def format_timestamp(seconds: float) -> str:
 def _merge_risk_event(events: list[dict], risk: dict, timestamp: float) -> None:
     """Merge nearby repeated risks so one object does not get counted every frame."""
     for event in reversed(events):
-        same_kind = event["label"] == risk["label"] and event["severity"] == risk["severity"]
+        same_kind = event["label"] == risk["label"]
         close_time = timestamp - event["last_seen_seconds"] <= 2.5
         if same_kind and close_time:
             event["last_seen_seconds"] = timestamp
-            event["penalty"] = max(event["penalty"], risk["penalty"])
+            if risk["penalty"] > event["penalty"]:
+                event["severity"] = risk["severity"]
+                event["message"] = risk["message"]
+                event["penalty"] = risk["penalty"]
             event["overlap_ratio"] = max(event["overlap_ratio"], risk["overlap_ratio"])
             event["observations"] += 1
             return
@@ -51,7 +54,11 @@ def _finalize_events(events: list[dict], config: AnalysisConfig) -> list[dict]:
         persistent = event["observations"] >= config.min_event_observations or duration >= 0.6
         severe = event["severity"] == "danger" and event["overlap_ratio"] >= 0.75
 
-        if event["risk_group"] == "small":
+        if event["risk_group"] == "custom":
+            keep = event["observations"] >= 1
+        elif event["risk_group"] == "large_clutter":
+            keep = event["observations"] >= 2
+        elif event["risk_group"] == "small":
             keep = event["observations"] >= 3 and event["overlap_ratio"] >= 0.55
         elif event["risk_group"] == "furniture":
             keep = event["observations"] >= 2 and event["overlap_ratio"] >= 0.35
@@ -61,6 +68,17 @@ def _finalize_events(events: list[dict], config: AnalysisConfig) -> list[dict]:
         if keep:
             finalized.append(event)
     return finalized
+
+
+def _preview_rank(measurements: list[dict]) -> tuple[int, float]:
+    """Rank annotated frames so the preview shows the clearest risk moment."""
+    severity_rank = {"safe": 0, "caution": 1, "danger": 2}
+    highest_severity = 0
+    highest_overlap = 0.0
+    for measurement in measurements:
+        highest_severity = max(highest_severity, severity_rank.get(measurement.get("severity", "safe"), 0))
+        highest_overlap = max(highest_overlap, float(measurement.get("overlap_ratio", 0.0)))
+    return highest_severity, highest_overlap
 
 
 def analyze_video(
@@ -108,6 +126,10 @@ def analyze_video(
     severity_counts: Counter[str] = Counter()
     group_counts: Counter[str] = Counter()
     max_path_overlap = 0.0
+    preview_path = output_path.with_name(f"{output_path.stem}_preview.jpg")
+    preview_frame = None
+    preview_rank = (-1, -1.0)
+    preview_timestamp = 0.0
 
     while True:
         if max_frames and frame_index >= max_frames:
@@ -140,10 +162,19 @@ def analyze_video(
         draw_measurements(annotated, last_measurements, draw_safe=config.draw_safe_detections)
         draw_legend(annotated)
         writer.write(annotated)
+
+        current_rank = _preview_rank(last_measurements)
+        if preview_frame is None or current_rank > preview_rank:
+            preview_frame = annotated.copy()
+            preview_rank = current_rank
+            preview_timestamp = frame_index / fps if fps else 0.0
         frame_index += 1
 
     cap.release()
     writer.release()
+
+    if preview_frame is not None:
+        cv2.imwrite(str(preview_path), preview_frame)
 
     events = _finalize_events(events, config)
     score = calculate_route_score(events)
@@ -151,6 +182,8 @@ def analyze_video(
     risk_frame_ratio = risk_sampled_frames / sampled_frames if sampled_frames else 0.0
     return {
         "output_path": str(output_path),
+        "preview_path": str(preview_path) if preview_frame is not None else "",
+        "preview_timestamp": preview_timestamp,
         "score": score,
         "risk_level": risk_level(score),
         "events": events,
