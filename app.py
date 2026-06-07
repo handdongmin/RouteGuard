@@ -1,6 +1,7 @@
 """Streamlit entry point for RouteGuard."""
 
 import base64
+import hashlib
 import os
 from pathlib import Path
 from uuid import uuid4
@@ -11,7 +12,7 @@ import streamlit as st
 from src.config import AnalysisConfig
 from src.detector import ObjectDetector
 from src.reporting import build_recommendations, compare_results, event_rows, render_text_report, summarize_events
-from src.video_analyzer import analyze_video
+from src.video_analyzer import ANALYZER_VERSION, analyze_video
 
 
 os.environ.setdefault("YOLO_CONFIG_DIR", str(Path("Ultralytics").resolve()))
@@ -347,8 +348,12 @@ def build_config() -> AnalysisConfig:
 def save_uploaded_file(uploaded_file) -> Path:
     """Persist an uploaded video under outputs/uploads."""
     suffix = Path(uploaded_file.name).suffix.lower() or ".mp4"
-    input_path = UPLOAD_DIR / f"{uuid4().hex}{suffix}"
-    input_path.write_bytes(uploaded_file.getbuffer())
+    data = uploaded_file.getbuffer()
+    digest = hashlib.sha1(data).hexdigest()[:12]
+    safe_stem = "".join(char if char.isalnum() else "_" for char in Path(uploaded_file.name).stem)[:40]
+    input_path = UPLOAD_DIR / f"{safe_stem}_{digest}{suffix}"
+    if not input_path.exists():
+        input_path.write_bytes(data)
     return input_path
 
 
@@ -363,8 +368,26 @@ def sample_options() -> dict[str, Path]:
 
 def analyze_path(input_path: Path, config: AnalysisConfig, detector: ObjectDetector, tag: str) -> dict:
     """Run RouteGuard analysis for a video path."""
-    output_path = RESULT_DIR / f"{input_path.stem}_{tag}_analyzed.mp4"
-    return analyze_video(input_path, output_path, config=config, detector=detector)
+    output_path = RESULT_DIR / f"{input_path.stem}_{tag}_{uuid4().hex[:8]}_analyzed.mp4"
+    result = analyze_video(input_path, output_path, config=config, detector=detector)
+    result["input_signature"] = input_signature(input_path)
+    return result
+
+
+def input_signature(input_path: Path) -> str:
+    """Return a stable signature so stale Streamlit results can be discarded."""
+    stat = input_path.stat()
+    return f"{input_path.resolve()}:{stat.st_size}:{stat.st_mtime_ns}"
+
+
+def is_fresh_result(result: dict | None, input_path: Path) -> bool:
+    """Check whether the displayed result belongs to the current analyzer and input."""
+    if not result:
+        return False
+    return (
+        result.get("analyzer_version") == ANALYZER_VERSION
+        and result.get("input_signature") == input_signature(input_path)
+    )
 
 
 def render_score_card(result: dict) -> None:
@@ -441,20 +464,29 @@ def decision_rows(result: dict) -> list[dict]:
 def render_result_media(result: dict) -> None:
     """Render a reliable visual result, with video as a secondary view."""
     st.subheader("분석 결과 미리보기")
+    if not result.get("events"):
+        st.success("감점 이벤트가 없습니다. 중앙 통로를 크게 막는 물체가 발견되지 않았습니다.")
+        return
+
+    gif_value = result.get("gif_path") or ""
+    gif_path = Path(gif_value) if gif_value else None
     preview_value = result.get("preview_path") or ""
     preview_path = Path(preview_value) if preview_value else None
+
     if preview_path and preview_path.exists():
         st.image(
             str(preview_path),
-            caption=f"가장 뚜렷하게 판단된 장면: {result.get('preview_timestamp', 0.0):.1f}초",
+            caption=f"가장 큰 감점 이벤트가 표시된 장면: {result.get('preview_timestamp', 0.0):.1f}초",
             use_container_width=True,
         )
+    elif gif_path and gif_path.exists():
+        st.image(str(gif_path), caption="방해물 박스가 표시된 분석 장면 요약", use_container_width=True)
     else:
-        st.info("대표 장면 이미지를 만들지 못해 결과 영상만 표시합니다.")
+        st.info("대표 장면 이미지를 만들지 못했습니다.")
 
-    with st.expander("분석 결과 영상 재생", expanded=False):
-        st.video(result["output_path"])
-        st.caption("브라우저에 따라 영상 플레이어가 검게 보일 수 있어 위의 대표 장면을 함께 제공합니다.")
+    if gif_path and gif_path.exists():
+        with st.expander("전체 분석 흐름 GIF 보기", expanded=False):
+            st.image(str(gif_path), caption="프레임별 방해물 박스 요약", use_container_width=True)
 
 
 def render_source_preview(input_path: Path) -> None:
@@ -490,13 +522,22 @@ def render_diagnostics(result: dict) -> None:
 def render_downloads(result: dict) -> None:
     """Render result download buttons."""
     output_path = Path(result["output_path"])
-    col_video, col_report = st.columns(2)
+    gif_value = result.get("gif_path") or ""
+    gif_path = Path(gif_value) if gif_value else None
+    col_video, col_gif, col_report = st.columns(3)
     if output_path.exists():
         col_video.download_button(
             "분석 결과 영상 다운로드",
             data=output_path.read_bytes(),
             file_name=output_path.name,
             mime="video/mp4",
+        )
+    if gif_path and gif_path.exists():
+        col_gif.download_button(
+            "분석 GIF 다운로드",
+            data=gif_path.read_bytes(),
+            file_name=gif_path.name,
+            mime="image/gif",
         )
     col_report.download_button(
         "분석 리포트 다운로드",
@@ -535,6 +576,10 @@ def render_single_analysis(config: AnalysisConfig, detector: ObjectDetector) -> 
         st.session_state["last_result"] = result
 
     result = st.session_state.get("last_result")
+    if result and not is_fresh_result(result, input_path):
+        st.session_state.pop("last_result", None)
+        result = None
+        st.info("분석 기준이 업데이트되었습니다. 현재 영상으로 다시 분석을 시작해 주세요.")
     if not result:
         return
 
@@ -571,6 +616,12 @@ def render_compare_analysis(config: AnalysisConfig, detector: ObjectDetector) ->
         st.session_state["compare_result"] = (before_result, after_result, compare_results(before_result, after_result))
 
     compare_state = st.session_state.get("compare_result")
+    if compare_state:
+        before_result, after_result, _comparison = compare_state
+        if not is_fresh_result(before_result, before_path) or not is_fresh_result(after_result, after_path):
+            st.session_state.pop("compare_result", None)
+            compare_state = None
+            st.info("비교 분석 기준이 업데이트되었습니다. 두 영상을 다시 분석해 주세요.")
     if not compare_state:
         return
 

@@ -5,12 +5,26 @@ from pathlib import Path
 from time import perf_counter
 
 import cv2
+from PIL import Image
 
 from src.config import AnalysisConfig
 from src.detector import ObjectDetector
 from src.path_analyzer import PathAnalyzer
 from src.risk_rules import build_risk, calculate_route_score, risk_level
 from src.visualizer import draw_legend, draw_measurements, draw_path_overlay
+
+
+PREVIEW_PREFERRED_LABELS = {
+    "backpack",
+    "chair",
+    "couch",
+    "handbag",
+    "potted plant",
+    "suitcase",
+    "umbrella",
+}
+
+ANALYZER_VERSION = "event-preview-v2"
 
 
 def format_timestamp(seconds: float) -> str:
@@ -70,15 +84,97 @@ def _finalize_events(events: list[dict], config: AnalysisConfig) -> list[dict]:
     return finalized
 
 
-def _preview_rank(measurements: list[dict]) -> tuple[int, float]:
+def _preview_rank(measurements: list[dict]) -> tuple[int, int, int, float, float]:
     """Rank annotated frames so the preview shows the clearest risk moment."""
     severity_rank = {"safe": 0, "caution": 1, "danger": 2}
     highest_severity = 0
     highest_overlap = 0.0
+    highest_area = 0.0
+    blocker_count = 0
+    preferred_count = 0
     for measurement in measurements:
-        highest_severity = max(highest_severity, severity_rank.get(measurement.get("severity", "safe"), 0))
+        severity = measurement.get("severity", "safe")
+        if severity == "safe":
+            continue
+        blocker_count += 1
+        if measurement.get("label") in PREVIEW_PREFERRED_LABELS:
+            preferred_count += 1
+        highest_severity = max(highest_severity, severity_rank.get(severity, 0))
         highest_overlap = max(highest_overlap, float(measurement.get("overlap_ratio", 0.0)))
-    return highest_severity, highest_overlap
+        highest_area = max(highest_area, float(measurement.get("bbox_area_ratio", 0.0)))
+    return blocker_count, preferred_count, highest_severity, highest_overlap, highest_area
+
+
+def _open_video_writer(output_path: Path, fps: float, size: tuple[int, int]) -> cv2.VideoWriter:
+    """Open the annotated MP4 writer."""
+    writer = cv2.VideoWriter(str(output_path), cv2.VideoWriter_fourcc(*"mp4v"), fps, size)
+    if writer.isOpened():
+        return writer
+    writer.release()
+    raise RuntimeError(f"Could not open output video: {output_path}")
+
+
+def _make_gif_frame(frame, max_width: int = 520) -> Image.Image:
+    """Convert an annotated OpenCV frame to a compact GIF frame."""
+    height, width = frame.shape[:2]
+    if width > max_width:
+        scale = max_width / width
+        frame = cv2.resize(frame, (max_width, int(height * scale)), interpolation=cv2.INTER_AREA)
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    return Image.fromarray(rgb)
+
+
+def _target_event(events: list[dict]) -> dict | None:
+    """Return the event that should drive the representative preview image."""
+    severity_rank = {"safe": 0, "caution": 1, "danger": 2}
+    if not events:
+        return None
+    return max(
+        events,
+        key=lambda event: (
+            int(event.get("penalty", 0)),
+            severity_rank.get(event.get("severity", "safe"), 0),
+            float(event.get("overlap_ratio", 0.0)),
+            int(event.get("observations", 0)),
+        ),
+    )
+
+
+def _candidate_rank_for_event(candidate: dict, event: dict | None) -> tuple[int, int, float, float, int]:
+    """Rank saved annotated frames against the highest-penalty event."""
+    if event is None:
+        blocker_count, preferred_count, severity, overlap, area = _preview_rank(candidate["measurements"])
+        return (preferred_count, severity, overlap, area, blocker_count)
+
+    severity_rank = {"safe": 0, "caution": 1, "danger": 2}
+    target_label = event.get("label")
+    matching = [measurement for measurement in candidate["measurements"] if measurement.get("label") == target_label]
+    if not matching:
+        return (0, 0, 0.0, 0.0, 0)
+
+    best = max(
+        matching,
+        key=lambda measurement: (
+            severity_rank.get(measurement.get("severity", "safe"), 0),
+            float(measurement.get("overlap_ratio", 0.0)),
+            float(measurement.get("bbox_area_ratio", 0.0)),
+        ),
+    )
+    return (
+        1,
+        severity_rank.get(best.get("severity", "safe"), 0),
+        float(best.get("overlap_ratio", 0.0)),
+        float(best.get("bbox_area_ratio", 0.0)),
+        len([measurement for measurement in candidate["measurements"] if measurement.get("severity") != "safe"]),
+    )
+
+
+def _select_preview_candidate(candidates: list[dict], events: list[dict]) -> dict | None:
+    """Choose the preview frame from the highest-penalty timeline event."""
+    if not candidates:
+        return None
+    target = _target_event(events)
+    return max(candidates, key=lambda candidate: _candidate_rank_for_event(candidate, target))
 
 
 def analyze_video(
@@ -107,15 +203,11 @@ def analyze_video(
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     max_frames = int(config.max_video_seconds * fps) if config.max_video_seconds else 0
 
-    writer = cv2.VideoWriter(
-        str(output_path),
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        fps,
-        (width, height),
-    )
-    if not writer.isOpened():
+    try:
+        writer = _open_video_writer(output_path, fps, (width, height))
+    except RuntimeError:
         cap.release()
-        raise RuntimeError(f"Could not open output video: {output_path}")
+        raise
 
     events: list[dict] = []
     frame_index = 0
@@ -127,9 +219,11 @@ def analyze_video(
     group_counts: Counter[str] = Counter()
     max_path_overlap = 0.0
     preview_path = output_path.with_name(f"{output_path.stem}_preview.jpg")
-    preview_frame = None
-    preview_rank = (-1, -1.0)
+    gif_path = output_path.with_name(f"{output_path.stem}_preview.gif")
+    preview_candidates: list[dict] = []
     preview_timestamp = 0.0
+    gif_frames: list[Image.Image] = []
+    gif_interval = max(1, int(fps // 3))
 
     while True:
         if max_frames and frame_index >= max_frames:
@@ -163,27 +257,47 @@ def analyze_video(
         draw_legend(annotated)
         writer.write(annotated)
 
-        current_rank = _preview_rank(last_measurements)
-        if preview_frame is None or current_rank > preview_rank:
-            preview_frame = annotated.copy()
-            preview_rank = current_rank
-            preview_timestamp = frame_index / fps if fps else 0.0
+        if any(measurement.get("severity") != "safe" for measurement in last_measurements):
+            preview_candidates.append(
+                {
+                    "frame": annotated.copy(),
+                    "measurements": [dict(measurement) for measurement in last_measurements],
+                    "timestamp": frame_index / fps if fps else 0.0,
+                }
+            )
+        if frame_index % gif_interval == 0 and len(gif_frames) < 45:
+            gif_frames.append(_make_gif_frame(annotated))
         frame_index += 1
 
     cap.release()
     writer.release()
 
-    if preview_frame is not None:
-        cv2.imwrite(str(preview_path), preview_frame)
-
     events = _finalize_events(events, config)
+    preview_candidate = _select_preview_candidate(preview_candidates, events) if events else None
+    preview_event = _target_event(events)
+    if preview_candidate:
+        preview_timestamp = float(preview_candidate["timestamp"])
+        cv2.imwrite(str(preview_path), preview_candidate["frame"])
+    if gif_frames and events:
+        gif_frames[0].save(
+            str(gif_path),
+            save_all=True,
+            append_images=gif_frames[1:],
+            duration=max(120, int(1000 * gif_interval / fps)) if fps else 250,
+            loop=0,
+            optimize=True,
+        )
+
     score = calculate_route_score(events)
     elapsed_seconds = perf_counter() - started_at
     risk_frame_ratio = risk_sampled_frames / sampled_frames if sampled_frames else 0.0
     return {
         "output_path": str(output_path),
-        "preview_path": str(preview_path) if preview_frame is not None else "",
+        "preview_path": str(preview_path) if preview_candidate else "",
+        "gif_path": str(gif_path) if gif_frames and events else "",
         "preview_timestamp": preview_timestamp,
+        "preview_event": preview_event or {},
+        "analyzer_version": ANALYZER_VERSION,
         "score": score,
         "risk_level": risk_level(score),
         "events": events,
