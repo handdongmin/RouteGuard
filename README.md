@@ -216,9 +216,9 @@ streamlit run app.py
 
 ### 정리 전후 비교 결과
 
-![정리 전후 비교 결과](assets/screenshot_compare1.png)
+![정리 전후 비교 결과](assets/compare1.png)
 
-![정리 전후 비교 결과](assets/screenshot_compare2.png)
+![정리 전후 비교 결과](assets/compare2.png)
 
 ## 기본 분석 설정
 
