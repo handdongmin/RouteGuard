@@ -132,30 +132,17 @@ routeguard/
   tests/                    # 위험도 계산 규칙 테스트
 ```
 
-## 샘플 결과
-
-안전, 부분 차단, 심한 차단 상황을 비교할 수 있는 샘플 영상입니다.
-
-| 샘플 | 안전 점수 | 위험 수준 | 위험 이벤트 | 최대 통로 겹침 | 설명 |
-| --- | ---: | --- | ---: | ---: | --- |
-| `safe/safe2.mp4` | **100 / 100** | **안전** | 0 | 0% | 중앙 통로가 확보된 안전 예시 |
-| `blocked_bag/bag2.mp4` | **68 / 100** | **주의** | 1 | 35% | 가방 후보가 이동 경로 일부를 막는 예시 |
-| `blocked_chair/chair2.mp4` | **63 / 100** | **주의** | 1 | 48% | 의자 후보가 통로를 크게 차지하는 예시 |
-| `blocked_bad/bad2.mp4` | **20 / 100** | **위험** | 3 | 46% | 여러 장애물이 동시에 통로를 막는 위험 예시 |
 
 ### 데모 미디어
 
-아래 이미지는 실제 샘플 영상을 분석해 생성한 결과입니다. 초록색 영역은 보행 통로 후보 영역이고, 노란색/빨간색 박스는 통로와 겹친 장애물 후보입니다.
+아래 이미지는 제 방의 실제 샘플 영상을 분석해 생성한 결과입니다. 초록색 영역은 보행 통로 후보 영역이고, 노란색/빨간색 박스는 통로와 겹친 장애물 후보입니다.
 
 ![심한 차단 예시](assets/demo_bad_preview.jpg)
-
-심한 차단 예시에서는 **캐리어, 의자, 가방 후보**가 시간대별 위험 이벤트로 기록되며 최종 점수는 **20점**으로 계산됩니다. 시간대별 발견 내용 중 **감점이 가장 큰 이벤트**를 대표 장면으로 선택해 README와 결과 화면에서 보여줍니다.
-
-부분 차단 예시:
 
 ![가방 차단 예시](assets/demo_bag_preview.jpg)
 
 ![의자 차단 예시](assets/demo_chair_preview.jpg)
+
 
 ## 실행 방법
 
@@ -214,23 +201,24 @@ streamlit run app.py
 
 ### 영상 업로드 화면
 
-![영상 업로드 화면](assets/screenshot_upload.png)
+![영상 업로드 화면](assets/upload.png)
 
-### 안전 영상 분석 결과
+### 안전한 영상 분석 결과
 
 ![안전 영상 분석 결과](assets/screenshot_safe_result.png)
 
-### 위험 영상 분석 결과
+### 위험 물체 3개 이상인 영상
 
-![위험 영상 분석 결과](assets/screenshot_bad_result.png)
+![위험 3개 영상 분석 결과](assets/screenshot_bad_result.png)
 
-### 시간대별 위험 리포트
+### 위험 물체 1개인 영상
 
-![시간대별 위험 리포트](assets/screenshot_timeline.png)
+![위험 1개 영상 분석 결과](assets/screenshot_bad_result.png)
 
 ### 정리 전후 비교 결과
 
-![정리 전후 비교 결과](assets/screenshot_compare.png)
+![정리 전후 비교 결과](assets/screenshot_compare1.png)
+![정리 전후 비교 결과](assets/screenshot_compare2.png)
 
 ## 기본 분석 설정
 
