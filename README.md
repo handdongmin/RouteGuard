@@ -194,30 +194,24 @@ streamlit run app.py
 
 ### 안전한 영상 분석 결과
 
-<img src="assets/safe1.png" width="1000">
-
-<img src="assets/safe2.png" width="100%">
+<img src="assets/safe1.png" width="1500">
+<img src="assets/safe2.png" width="1500">
 
 ### 위험 물체 3개 이상인 영상
 
 ![위험 3개 영상 분석 결과](assets/bad1.png)
-
 ![위험 3개 영상 분석 결과](assets/bad2.png)
-
 ![위험 3개 영상 분석 결과](assets/bad3.png)
 
 ### 위험 물체 1개인 영상
 
 ![위험 1개 영상 분석 결과](assets/chair1.png)
-
 ![위험 1개 영상 분석 결과](assets/chair2.png)
-
 ![위험 1개 영상 분석 결과](assets/chair3.png)
 
 ### 정리 전후 비교 결과
 
 ![정리 전후 비교 결과](assets/compare1.png)
-
 ![정리 전후 비교 결과](assets/compare2.png)
 
 ## 기본 분석 설정
