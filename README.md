@@ -187,6 +187,8 @@ streamlit run app.py
 
 ## Demo & Screenshots
 
+### 분석 흐름 GIF (의자가 대피경로에 놓여져 있을 경우)
+![분석 흐름 GIF](assets/chair.gif)
 
 ### 영상 업로드 화면
 
@@ -194,20 +196,23 @@ streamlit run app.py
 
 ### 안전한 영상 분석 결과
 
-<img src="assets/safe1.png" width="1500">
-<img src="assets/safe2.png" width="1500">
+![안전 영상 분석 결과](assets/safe1.png)
+![안전 영상 분석 결과](assets/safe2.png)
+![안전 영상 분석 결과](assets/safe3.png)
 
-### 위험 물체 3개 이상인 영상
+### 위험 물체 3개 이상(의자, 선풍기, 가방)인 영상
 
 ![위험 3개 영상 분석 결과](assets/bad1.png)
 ![위험 3개 영상 분석 결과](assets/bad2.png)
 ![위험 3개 영상 분석 결과](assets/bad3.png)
+![위험 3개 영상 분석 결과](assets/bad4.png)
 
-### 위험 물체 1개인 영상
+### 위험 물체 1개(의자)인 영상
 
 ![위험 1개 영상 분석 결과](assets/chair1.png)
 ![위험 1개 영상 분석 결과](assets/chair2.png)
 ![위험 1개 영상 분석 결과](assets/chair3.png)
+![위험 1개 영상 분석 결과](assets/chair4.png)
 
 ### 정리 전후 비교 결과
 
