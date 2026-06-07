@@ -133,17 +133,6 @@ routeguard/
 ```
 
 
-### 데모 미디어
-
-아래 이미지는 제 방의 실제 샘플 영상을 분석해 생성한 결과입니다. 초록색 영역은 보행 통로 후보 영역이고, 노란색/빨간색 박스는 통로와 겹친 장애물 후보입니다.
-
-![심한 차단 예시](assets/demo_bad_preview.jpg)
-
-![가방 차단 예시](assets/demo_bag_preview.jpg)
-
-![의자 차단 예시](assets/demo_chair_preview.jpg)
-
-
 ## 실행 방법
 
 ### 1. 가상 환경 생성
@@ -205,19 +194,30 @@ streamlit run app.py
 
 ### 안전한 영상 분석 결과
 
-![안전 영상 분석 결과](assets/screenshot_safe_result.png)
+![안전 영상 분석 결과](assets/safe1.png)
+
+![안전 영상 분석 결과](assets/safe2.png)
 
 ### 위험 물체 3개 이상인 영상
 
-![위험 3개 영상 분석 결과](assets/screenshot_bad_result.png)
+![위험 3개 영상 분석 결과](assets/bad1.png)
+
+![위험 3개 영상 분석 결과](assets/bad2.png)
+
+![위험 3개 영상 분석 결과](assets/bad3.png)
 
 ### 위험 물체 1개인 영상
 
-![위험 1개 영상 분석 결과](assets/screenshot_bad_result.png)
+![위험 1개 영상 분석 결과](assets/chair1.png)
+
+![위험 1개 영상 분석 결과](assets/chair2.png)
+
+![위험 1개 영상 분석 결과](assets/chair3.png)
 
 ### 정리 전후 비교 결과
 
 ![정리 전후 비교 결과](assets/screenshot_compare1.png)
+
 ![정리 전후 비교 결과](assets/screenshot_compare2.png)
 
 ## 기본 분석 설정
