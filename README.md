@@ -194,9 +194,9 @@ streamlit run app.py
 
 ### 안전한 영상 분석 결과
 
-<img src="assets/safe1.png" width="100%">
+<img src="assets/safe1.png" width="130%">
 
-<img src="assets/safe2.png" width="100%">
+<img src="assets/safe2.png" width="130%">
 
 ### 위험 물체 3개 이상인 영상
 
